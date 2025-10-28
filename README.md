@@ -172,7 +172,7 @@ Implements two external services, one to smartly handle email notifications when
 teams' expenditure patterns and future management issues.
 The AI is a free tier and has a rate limiter issue, but if you provide your billing information, it will work!
 
-## 4. Swagger Documentation of API 
+## 4. Swagger Documentation 
 ```
 http://host:port/api/docs
 ```
