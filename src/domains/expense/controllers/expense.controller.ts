@@ -15,14 +15,33 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { format } from 'date-fns';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiParam,
+  ApiQuery,
+  ApiBody,
+  ApiBadRequestResponse,
+  ApiNotFoundResponse,
+  ApiInternalServerErrorResponse,
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiProduces,
+} from '@nestjs/swagger';
 import { ExpenseService } from '../services/expense.service';
 import {
   CreateExpenseDto,
   UpdateExpenseDto,
   BulkActionDto,
+  ExpenseResponseDto,
+  SpendingInsightsDto,
+  BudgetForecastDto,
 } from '../dto/expense.dto';
+import { ApiResponseDto, PaginatedResponseDto } from '../../../shared/dto/api-response.dto';
 import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 
+@ApiTags('Expenses')
 @Controller('expenses')
 export class ExpenseController {
   private readonly logger = new Logger(ExpenseController.name);
@@ -30,6 +49,55 @@ export class ExpenseController {
   constructor(private readonly expenseService: ExpenseService) {}
 
   @Post()
+  @ApiOperation({
+    summary: 'Create a new expense',
+    description: 'Creates a new expense with AI-powered category suggestion and duplicate detection. The system will automatically suggest categories and check for potential duplicates.',
+  })
+  @ApiBody({
+    type: CreateExpenseDto,
+    description: 'Expense creation data',
+  })
+  @ApiCreatedResponse({
+    description: 'Expense created successfully',
+    schema: {
+      example: {
+        success: true,
+        expense: {
+          _id: '507f1f77bcf86cd799439011',
+          team: '507f1f77bcf86cd799439012',
+          description: 'Business lunch with client',
+          amount: 75.50,
+          category: 'Meals',
+          status: 'pending',
+          submittedBy: {
+            name: 'John Doe',
+            email: 'john.doe@company.com'
+          },
+          date: '2024-01-15',
+          isDuplicate: false,
+          createdAt: '2024-01-15T10:30:00.000Z',
+          updatedAt: '2024-01-15T10:30:00.000Z'
+        },
+        aiSuggestion: {
+          category: 'Meals',
+          confidence: 0.95
+        },
+        duplicateWarning: null
+      }
+    }
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid input data or team not found',
+    schema: {
+      example: {
+        success: false,
+        message: 'Team not found'
+      }
+    }
+  })
+  @ApiInternalServerErrorResponse({
+    description: 'Internal server error',
+  })
   async create(@Body() createExpenseDto: CreateExpenseDto) {
     try {
       const result = await this.expenseService.create(createExpenseDto);
@@ -57,6 +125,80 @@ export class ExpenseController {
   }
 
   @Get()
+  @ApiOperation({
+    summary: 'Get all expenses',
+    description: 'Retrieves a paginated list of expenses with optional filtering by team, status, category, date range, and search terms.',
+  })
+  @ApiQuery({
+    name: 'team',
+    description: 'Filter by team ID',
+    required: false,
+    example: '507f1f77bcf86cd799439011',
+  })
+  @ApiQuery({
+    name: 'status',
+    description: 'Filter by expense status',
+    required: false,
+    enum: ['pending', 'approved', 'rejected'],
+    example: 'approved',
+  })
+  @ApiQuery({
+    name: 'category',
+    description: 'Filter by expense category',
+    required: false,
+    example: 'Travel',
+  })
+  @ApiQuery({
+    name: 'startDate',
+    description: 'Filter expenses from this date (YYYY-MM-DD)',
+    required: false,
+    example: '2024-01-01',
+  })
+  @ApiQuery({
+    name: 'endDate',
+    description: 'Filter expenses until this date (YYYY-MM-DD)',
+    required: false,
+    example: '2024-12-31',
+  })
+  @ApiQuery({
+    name: 'search',
+    description: 'Search in description and category',
+    required: false,
+    example: 'lunch',
+  })
+  @ApiQuery({
+    name: 'limit',
+    description: 'Number of expenses per page',
+    required: false,
+    example: 50,
+  })
+  @ApiQuery({
+    name: 'page',
+    description: 'Page number',
+    required: false,
+    example: 1,
+  })
+  @ApiQuery({
+    name: 'sortBy',
+    description: 'Field to sort by',
+    required: false,
+    enum: ['date', 'amount', 'createdAt'],
+    example: 'date',
+  })
+  @ApiQuery({
+    name: 'sortOrder',
+    description: 'Sort order',
+    required: false,
+    enum: ['asc', 'desc'],
+    example: 'desc',
+  })
+  @ApiOkResponse({
+    description: 'Expenses retrieved successfully',
+    type: PaginatedResponseDto,
+  })
+  @ApiInternalServerErrorResponse({
+    description: 'Internal server error',
+  })
   async findAll(@Query() query: any) {
     try {
       const result = await this.expenseService.findAll(query);
@@ -83,6 +225,25 @@ export class ExpenseController {
   }
 
   @Get(':id')
+  @ApiOperation({
+    summary: 'Get expense by ID',
+    description: 'Retrieves a specific expense by its ID with populated team information.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Expense ID',
+    example: '507f1f77bcf86cd799439011',
+  })
+  @ApiOkResponse({
+    description: 'Expense retrieved successfully',
+    type: ApiResponseDto<ExpenseResponseDto>,
+  })
+  @ApiNotFoundResponse({
+    description: 'Expense not found',
+  })
+  @ApiInternalServerErrorResponse({
+    description: 'Internal server error',
+  })
   async findOne(@Param('id') id: string) {
     try {
       const expense = await this.expenseService.findOne(id);
@@ -108,6 +269,32 @@ export class ExpenseController {
   }
 
   @Put(':id')
+  @ApiOperation({
+    summary: 'Update expense',
+    description: 'Updates an existing expense. When status is changed to approved/rejected, team spending is automatically updated and email notifications are sent.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Expense ID',
+    example: '507f1f77bcf86cd799439011',
+  })
+  @ApiBody({
+    type: UpdateExpenseDto,
+    description: 'Updated expense data',
+  })
+  @ApiOkResponse({
+    description: 'Expense updated successfully',
+    type: ApiResponseDto<ExpenseResponseDto>,
+  })
+  @ApiNotFoundResponse({
+    description: 'Expense not found',
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid data',
+  })
+  @ApiInternalServerErrorResponse({
+    description: 'Internal server error',
+  })
   async update(
     @Param('id') id: string,
     @Body() updateExpenseDto: UpdateExpenseDto,
@@ -136,6 +323,30 @@ export class ExpenseController {
   }
 
   @Delete(':id')
+  @ApiOperation({
+    summary: 'Delete expense',
+    description: 'Deletes an expense. If the expense was approved, it will be subtracted from the team\'s current spending.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Expense ID',
+    example: '507f1f77bcf86cd799439011',
+  })
+  @ApiOkResponse({
+    description: 'Expense deleted successfully',
+    schema: {
+      example: {
+        success: true,
+        message: 'Expense deleted successfully'
+      }
+    }
+  })
+  @ApiNotFoundResponse({
+    description: 'Expense not found',
+  })
+  @ApiInternalServerErrorResponse({
+    description: 'Internal server error',
+  })
   async remove(@Param('id') id: string) {
     try {
       await this.expenseService.remove(id);
@@ -161,6 +372,25 @@ export class ExpenseController {
   }
 
   @Get(':teamId/insights')
+  @ApiOperation({
+    summary: 'Get AI spending insights',
+    description: 'Generates AI-powered spending insights for a team including summary, trends, recommendations, and budget health analysis. Results are cached for 5 minutes.',
+  })
+  @ApiParam({
+    name: 'teamId',
+    description: 'Team ID',
+    example: '507f1f77bcf86cd799439011',
+  })
+  @ApiOkResponse({
+    description: 'Insights generated successfully',
+    type: ApiResponseDto<SpendingInsightsDto>,
+  })
+  @ApiNotFoundResponse({
+    description: 'Team not found',
+  })
+  @ApiInternalServerErrorResponse({
+    description: 'Internal server error or AI service unavailable',
+  })
   @UseInterceptors(CacheInterceptor)
   @CacheTTL(300) 
   async getInsights(@Param('teamId') teamId: string) {
@@ -196,6 +426,25 @@ export class ExpenseController {
   }
 
   @Get(':teamId/forecast')
+  @ApiOperation({
+    summary: 'Get AI budget forecast',
+    description: 'Generates AI-powered budget forecast for a team predicting whether they will exceed their budget and providing recommendations. Results are cached for 5 minutes.',
+  })
+  @ApiParam({
+    name: 'teamId',
+    description: 'Team ID',
+    example: '507f1f77bcf86cd799439011',
+  })
+  @ApiOkResponse({
+    description: 'Forecast generated successfully',
+    type: ApiResponseDto<BudgetForecastDto>,
+  })
+  @ApiNotFoundResponse({
+    description: 'Team not found',
+  })
+  @ApiInternalServerErrorResponse({
+    description: 'Internal server error or AI service unavailable',
+  })
   @UseInterceptors(CacheInterceptor)
   @CacheTTL(300) 
   async getForecast(@Param('teamId') teamId: string) {
@@ -231,6 +480,30 @@ export class ExpenseController {
   }
 
   @Post('bulk-action')
+  @ApiOperation({
+    summary: 'Bulk approve/reject expenses',
+    description: 'Performs bulk approval or rejection of multiple expenses. Updates team spending and sends email notifications for each expense.',
+  })
+  @ApiBody({
+    type: BulkActionDto,
+    description: 'Bulk action data including expense IDs and action type',
+  })
+  @ApiOkResponse({
+    description: 'Bulk action completed successfully',
+    schema: {
+      example: {
+        success: true,
+        message: '5 expenses approved successfully',
+        updatedCount: 5
+      }
+    }
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid data or some expenses not found',
+  })
+  @ApiInternalServerErrorResponse({
+    description: 'Internal server error',
+  })
   async bulkAction(@Body() bulkActionDto: BulkActionDto) {
     try {
       const result = await this.expenseService.bulkAction(bulkActionDto);
@@ -258,6 +531,39 @@ export class ExpenseController {
   }
 
   @Post('export-pdf')
+  @ApiOperation({
+    summary: 'Export expenses to PDF',
+    description: 'Generates and downloads a PDF report of expenses with optional filtering. The PDF includes a formatted table with expense details and totals.',
+  })
+  @ApiBody({
+    description: 'Filter parameters for the PDF export',
+    schema: {
+      type: 'object',
+      properties: {
+        team: { type: 'string', example: '507f1f77bcf86cd799439011' },
+        status: { type: 'string', enum: ['pending', 'approved', 'rejected'], example: 'approved' },
+        category: { type: 'string', example: 'Travel' },
+        startDate: { type: 'string', format: 'date', example: '2024-01-01' },
+        endDate: { type: 'string', format: 'date', example: '2024-12-31' },
+        search: { type: 'string', example: 'lunch' }
+      }
+    }
+  })
+  @ApiProduces('application/pdf')
+  @ApiOkResponse({
+    description: 'PDF file generated successfully',
+    content: {
+      'application/pdf': {
+        schema: {
+          type: 'string',
+          format: 'binary'
+        }
+      }
+    }
+  })
+  @ApiInternalServerErrorResponse({
+    description: 'Internal server error',
+  })
   async exportPdf(@Body() filters: any, @Res() res: Response): Promise<void> {
     try {
       const buffer = await this.expenseService.exportPdf(filters);

@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 import compression from 'compression';
 import helmet from 'helmet';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -28,6 +29,34 @@ async function bootstrap() {
     }),
   );
   app.setGlobalPrefix('api');
+
+ 
+  const config = new DocumentBuilder()
+    .setTitle('Expense Management System API')
+    .setDescription(`
+      A comprehensive expense management system API built with NestJS and MongoDB.`)
+    .setVersion('1.0.0')
+    .setLicense('MIT', 'https://opensource.org/licenses/MIT')
+    .addTag('Teams', 'Team management and budget tracking')
+    .addTag('Expenses', 'Expense management and approval workflow')
+    .addTag('Analytics', 'Budget insights and forecasting')
+    .addTag('Reports', 'PDF export and reporting')
+    .addServer('http://localhost:5000', 'Development server')
+    .build();
+
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup('api/docs', app, document, {
+    customSiteTitle: 'Expense Management API',
+    customfavIcon: '/favicon.ico',
+    customCss: '.swagger-ui .topbar { display: none }',
+    swaggerOptions: {
+      persistAuthorization: true,
+      displayRequestDuration: true,
+      filter: true,
+      showExtensions: true,
+      showCommonExtensions: true,
+    },
+  });
 
   const port = configService.get<number>('port') || 5000;
   await app.listen(port);
