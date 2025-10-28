@@ -45,54 +45,39 @@ export class ExpenseService {
       throw new BadRequestException('Team not found');
     }
 
-    // Disable AI services in production to save memory
+    const aiSuggestion = await this.aiService.suggestExpenseCategory(
+      createExpenseDto.description,
+      createExpenseDto.amount,
+    );
     let aiSuggestedCategory: any = null;
-    let isDuplicate = false;
-    let duplicateReason: string | null = null;
-
-    if (process.env.NODE_ENV !== 'production') {
-      try {
-        const aiSuggestion = await this.aiService.suggestExpenseCategory(
-          createExpenseDto.description,
-          createExpenseDto.amount,
-        );
-        if (aiSuggestion.success) {
-          aiSuggestedCategory = aiSuggestion.category;
-        }
-
-        const recentExpenses = await this.expenseModel
-          .find({
-            $or: [
-              { team: teamId },
-              { $expr: { $eq: [{ $toString: '$team' }, String(teamId)] } },
-            ],
-            date: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
-          })
-          .limit(10);
-
-        const duplicateCheck = await this.aiService.detectDuplicateExpense(
-          createExpenseDto.description,
-          createExpenseDto.amount,
-          createExpenseDto.team,
-          recentExpenses,
-        );
-
-        if (duplicateCheck.success) {
-          isDuplicate = duplicateCheck.isDuplicate || false;
-          duplicateReason = duplicateCheck.reason || null;
-        }
-      } catch (error) {
-        this.logger.warn('AI services unavailable, proceeding without AI features');
-      }
+    if (aiSuggestion.success) {
+      aiSuggestedCategory = aiSuggestion.category;
     }
+
+    const recentExpenses = await this.expenseModel
+      .find({
+        $or: [
+          { team: teamId },
+          { $expr: { $eq: [{ $toString: '$team' }, String(teamId)] } },
+        ],
+        date: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
+      })
+      .limit(10);
+
+    const duplicateCheck = await this.aiService.detectDuplicateExpense(
+      createExpenseDto.description,
+      createExpenseDto.amount,
+      createExpenseDto.team,
+      recentExpenses,
+    );
 
     const expense = new this.expenseModel({
       ...createExpenseDto,
       team: teamId,
       date: new Date(createExpenseDto.date),
       aiSuggestedCategory,
-      isDuplicate,
-      duplicateReason,
+      isDuplicate: duplicateCheck.success ? duplicateCheck.isDuplicate : false,
+      duplicateReason: duplicateCheck.success ? duplicateCheck.reason : null,
     });
 
     const savedExpense = await expense.save();
@@ -103,14 +88,14 @@ export class ExpenseService {
       duplicateWarning: null,
     } as unknown as CreateExpenseResponse;
 
-    if (aiSuggestedCategory) {
-      result.aiSuggestion = { category: aiSuggestedCategory } as any;
+    if (aiSuggestion.success) {
+      result.aiSuggestion = { category: aiSuggestion.category } as any;
     }
-    if (isDuplicate) {
+    if (duplicateCheck.success && duplicateCheck.isDuplicate) {
       result.duplicateWarning = {
         isDuplicate: true,
-        confidence: 0.8, 
-        reason: duplicateReason || 'Potential duplicate detected',
+        confidence: duplicateCheck.confidence,
+        reason: duplicateCheck.reason,
       } as any;
     }
 
@@ -334,20 +319,6 @@ export class ExpenseService {
   }
 
   async getInsights(teamId: string): Promise<any> {
-    // Disable AI services in production to save memory
-    if (process.env.NODE_ENV === 'production') {
-      return {
-        summary: 'AI insights disabled in production to optimize memory usage',
-        topCategory: 'N/A',
-        trends: 'N/A',
-        recommendations: ['Upgrade to paid tier for AI features'],
-        budgetHealth: 'N/A',
-        totalSpent: 0,
-        budgetUtilization: 0,
-        categoryBreakdown: {}
-      };
-    }
-
     const team = await this.teamModel.findById(teamId);
     if (!team) {
       throw new NotFoundException('Team not found');
@@ -362,47 +333,20 @@ export class ExpenseService {
       })
       .sort({ date: -1 });
 
-    try {
-      const insights = await this.aiService.generateSpendingInsights(
-        teamId,
-        expenses,
-        team.budget,
-      );
+    const insights = await this.aiService.generateSpendingInsights(
+      teamId,
+      expenses,
+      team.budget,
+    );
 
-      if (!insights.success) {
-        throw new BadRequestException(insights.error);
-      }
-
-      return insights.insights;
-    } catch (error) {
-      this.logger.warn('AI insights service unavailable, returning basic data');
-      return {
-        summary: 'AI insights temporarily unavailable',
-        topCategory: 'N/A',
-        trends: 'N/A',
-        recommendations: ['AI services are temporarily unavailable'],
-        budgetHealth: 'N/A',
-        totalSpent: 0,
-        budgetUtilization: 0,
-        categoryBreakdown: {}
-      };
+    if (!insights.success) {
+      throw new BadRequestException(insights.error);
     }
+
+    return insights.insights;
   }
 
   async getForecast(teamId: string): Promise<any> {
-    // Disable AI services in production to save memory
-    if (process.env.NODE_ENV === 'production') {
-      return {
-        willExceedBudget: false,
-        confidence: 0,
-        predictedOverspend: 0,
-        monthsToExceed: 0,
-        recommendations: ['Upgrade to paid tier for AI features'],
-        averageMonthlySpending: 0,
-        currentUtilization: 0
-      };
-    }
-
     const team = await this.teamModel.findById(teamId);
     if (!team) {
       throw new NotFoundException('Team not found');
@@ -417,31 +361,18 @@ export class ExpenseService {
       })
       .sort({ date: -1 });
 
-    try {
-      const forecast = await this.aiService.forecastBudgetExceedance(
-        teamId,
-        expenses,
-        team.budget,
-        team.currentSpending,
-      );
+    const forecast = await this.aiService.forecastBudgetExceedance(
+      teamId,
+      expenses,
+      team.budget,
+      team.currentSpending,
+    );
 
-      if (!forecast.success) {
-        throw new BadRequestException(forecast.error);
-      }
-
-      return forecast.forecast;
-    } catch (error) {
-      this.logger.warn('AI forecast service unavailable, returning basic data');
-      return {
-        willExceedBudget: false,
-        confidence: 0,
-        predictedOverspend: 0,
-        monthsToExceed: 0,
-        recommendations: ['AI services are temporarily unavailable'],
-        averageMonthlySpending: 0,
-        currentUtilization: 0
-      };
+    if (!forecast.success) {
+      throw new BadRequestException(forecast.error);
     }
+
+    return forecast.forecast;
   }
 
   async bulkAction(
@@ -491,5 +422,147 @@ export class ExpenseService {
     };
   }
 
-  // PDF export removed for memory optimization on Render free tier
+  async exportPdf(filter: any): Promise<Buffer> {
+    const { expenses } = await this.findAll({
+      ...filter,
+      limit: 50,
+      page: 1,
+      sortBy: 'date',
+      sortOrder: 'desc',
+    });
+
+    const PDFDocument = (await import('pdfkit')).default;
+    const doc = new PDFDocument({ size: 'A4', margin: 40 });
+    const chunks: Buffer[] = [];
+    const { format } = await import('date-fns');
+
+    const money = new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+    });
+
+    const marginLeft = 40;
+    const marginRight = 555; 
+    const tableTopStart = 170; 
+
+    const colX = {
+      description: marginLeft,
+      amount: 250, 
+      category: 320, 
+      date: 420, 
+      team: 500, 
+    } as const;
+    const colWidth = {
+      description: 140, 
+      amount: 60,
+      category: 80,
+      date: 70,
+      team: 60,
+    } as const;
+    const rowHeight = 50;
+
+    const drawHeader = () => {
+      doc.fontSize(11).fillColor('#111111').font('Helvetica-Bold');
+      const headerY = doc.y;
+      doc
+        .rect(marginLeft - 2, headerY - 4, marginRight - marginLeft + 4, rowHeight)
+        .fill('#F3F4F6');
+      doc.fillColor('#111111');
+      doc.text('Description', colX.description, headerY, { width: colWidth.description });
+      doc.text('Amount', colX.amount, headerY, { width: colWidth.amount, align: 'right' });
+      doc.text('Category', colX.category, headerY, { width: colWidth.category });
+      doc.text('Date', colX.date, headerY, { width: colWidth.date });
+      doc.text('Team', colX.team, headerY, { width: colWidth.team, align: 'left' }); 
+      doc.strokeColor('#000000');
+    };
+
+    const ensureSpaceForRow = () => {
+      if (doc.y + rowHeight * 1.5 > doc.page.height - doc.page.margins.bottom) { 
+        doc.addPage();
+        doc.font('Helvetica-Bold').fontSize(12).text('Expense Report (cont.)', { align: 'left' });
+        doc.moveDown(0.5);
+        drawHeader();
+      }
+    };
+
+    const truncate = (text: unknown, max = 60) => {
+      const s = String(text ?? '');
+      return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+    };
+
+    return await new Promise<Buffer>((resolve, reject) => {
+      doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+      doc.on('error', (err: Error) => reject(err));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+
+      doc.fontSize(18).font('Helvetica-Bold').text('Expense Report', { align: 'center' });
+      doc.moveDown(0.25);
+      doc.fontSize(10).font('Helvetica').text(`Generated: ${format(new Date(), 'PPpp')}`, { align: 'center' });
+      doc.moveDown(0.75);
+
+      const usedFilters: string[] = [];
+      try {
+        const entries = Object.entries(filter ?? {}) as Array<[string, unknown]>;
+        for (const [k, v] of entries) {
+          if (v !== undefined && v !== null && String(v).length > 0) {
+            usedFilters.push(`${k}: ${String(v)}`);
+          }
+        }
+      } catch {}
+      if (usedFilters.length > 0) {
+        doc.fontSize(10).fillColor('#374151').text(`Filters: ${usedFilters.join('  |  ')}`);
+        doc.fillColor('#000000');
+      }
+      doc.moveDown(0.75);
+
+      doc.y = tableTopStart;
+      drawHeader();
+
+      let totalAmount = 0;
+      expenses.forEach((e, idx) => {
+        ensureSpaceForRow();
+        const y = doc.y + 8;
+        const isStripe = idx % 2 === 0;
+        if (isStripe) {
+          doc
+            .rect(marginLeft - 2, doc.y - 2, marginRight - marginLeft + 4, rowHeight)
+            .fill('#FAFAFA');
+          doc.fillColor('#000000');
+        }
+
+        const teamName = typeof (e as any).team === 'object' && (e as any).team?.name
+          ? (e as any).team.name
+          : String((e as any).team ?? 'N/A');
+
+        const desc = truncate((e as any).description, 50);
+        const amount = money.format(Number((e as any).amount ?? 0));
+        const category = String((e as any).category ?? '');
+        const dateStr = format(new Date((e as any).date), 'yyyy-MM-dd');
+        const teamNameTruncated = truncate(teamName, 18);
+
+        totalAmount += Number((e as any).amount ?? 0);
+
+        doc.fontSize(10).text(desc, colX.description, y, { width: colWidth.description });
+        doc.text(amount, colX.amount, y, { width: colWidth.amount, align: 'right' });
+        doc.text(category, colX.category, y, { width: colWidth.category });
+        doc.text(dateStr, colX.date, y, { width: colWidth.date });
+        doc.text(teamNameTruncated, colX.team, y, { width: colWidth.team, align: 'left' }); 
+
+        doc.y = y + rowHeight - 8;
+      });
+
+      ensureSpaceForRow();
+      doc.moveDown(0.25);
+      doc.moveTo(marginLeft, doc.y).lineTo(marginRight, doc.y).strokeColor('#E5E7EB').stroke();
+      doc.strokeColor('#000000');
+      doc.moveDown(0.25);
+      doc.font('Helvetica-Bold');
+      doc.text('Total', colX.description, doc.y, { width: colWidth.description });
+      doc.text(money.format(totalAmount), colX.amount, doc.y, { width: colWidth.amount, align: 'right' });
+      doc.font('Helvetica');
+
+      doc.end();
+    });
+  }
 }

@@ -30,9 +30,7 @@ async function bootstrap() {
   );
   app.setGlobalPrefix('api');
 
- 
-  // Only enable Swagger in development to save memory
-  if (process.env.NODE_ENV !== 'production') {
+  {
     const config = new DocumentBuilder()
       .setTitle('Expense Management System API')
       .setDescription(`
@@ -66,7 +64,6 @@ async function bootstrap() {
 
   console.log(`Server running on port ${port}`);
   
-  // Memory monitoring for Render free tier
   setInterval(() => {
     const used = process.memoryUsage();
     const heapUsedMB = Math.round(used.heapUsed / 1024 / 1024);
