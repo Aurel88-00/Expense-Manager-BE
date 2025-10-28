@@ -11,14 +11,10 @@ import {
   HttpStatus,
   Logger,
   UseInterceptors,
-  Res,
 } from '@nestjs/common';
-import type { Response } from 'express';
-import { format } from 'date-fns';
 import {
   ApiTags,
   ApiOperation,
-  ApiResponse,
   ApiParam,
   ApiQuery,
   ApiBody,
@@ -27,7 +23,6 @@ import {
   ApiInternalServerErrorResponse,
   ApiCreatedResponse,
   ApiOkResponse,
-  ApiProduces,
 } from '@nestjs/swagger';
 import { ExpenseService } from '../services/expense.service';
 import {
@@ -530,55 +525,5 @@ export class ExpenseController {
     }
   }
 
-  @Post('export-pdf')
-  @ApiOperation({
-    summary: 'Export expenses to PDF',
-    description: 'Generates and downloads a PDF report of expenses with optional filtering. The PDF includes a formatted table with expense details and totals.',
-  })
-  @ApiBody({
-    description: 'Filter parameters for the PDF export',
-    schema: {
-      type: 'object',
-      properties: {
-        team: { type: 'string', example: '507f1f77bcf86cd799439011' },
-        status: { type: 'string', enum: ['pending', 'approved', 'rejected'], example: 'approved' },
-        category: { type: 'string', example: 'Travel' },
-        startDate: { type: 'string', format: 'date', example: '2024-01-01' },
-        endDate: { type: 'string', format: 'date', example: '2024-12-31' },
-        search: { type: 'string', example: 'lunch' }
-      }
-    }
-  })
-  @ApiProduces('application/pdf')
-  @ApiOkResponse({
-    description: 'PDF file generated successfully',
-    content: {
-      'application/pdf': {
-        schema: {
-          type: 'string',
-          format: 'binary'
-        }
-      }
-    }
-  })
-  @ApiInternalServerErrorResponse({
-    description: 'Internal server error',
-  })
-  async exportPdf(@Body() filters: any, @Res() res: Response): Promise<void> {
-    try {
-      const buffer = await this.expenseService.exportPdf(filters);
-      const filename = `Expense_Report_${format(new Date(), 'yyyyMMdd')}.pdf`;
-
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      res.status(200).send(buffer);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to export PDF';
-      this.logger.error(`Error exporting PDF: ${message}`);
-      throw new HttpException(
-        { success: false, message },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
+ 
 }

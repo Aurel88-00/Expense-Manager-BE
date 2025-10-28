@@ -73,12 +73,12 @@ async function bootstrap() {
     console.log(`Memory usage: ${heapUsedMB}MB`);
     
     if (heapUsedMB > 300) { // Alert if over 300MB (60% of 512MB)
-      console.warn(`⚠️ High memory usage: ${heapUsedMB}MB`);
+      console.warn(` Warning: High memory usage: ${heapUsedMB}MB`);
     }
   }, 30000);
 }
 
-// Graceful shutdown for Render
+
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down gracefully');
   process.exit(0);
