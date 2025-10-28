@@ -148,9 +148,10 @@ export class ExpenseService {
     const expenses = await this.expenseModel
       .find(filter)
       .sort(sort)
-      .limit(parseInt(limit))
+      .limit(Math.min(parseInt(limit), 50)) // Cap at 50 for Render free tier
       .skip(skip)
       .populate('team', 'name budget currentSpending')
+      .lean() // Use lean() to reduce memory usage
       .exec();
 
     const total = await this.expenseModel.countDocuments(filter);
@@ -428,7 +429,7 @@ export class ExpenseService {
   async exportPdf(filter: any): Promise<Buffer> {
     const { expenses } = await this.findAll({
       ...filter,
-      limit: 1000,
+      limit: 50, // Severely reduced for Render free tier
       page: 1,
       sortBy: 'date',
       sortOrder: 'desc',

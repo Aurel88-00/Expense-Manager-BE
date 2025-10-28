@@ -58,9 +58,32 @@ async function bootstrap() {
     },
   });
 
-  const port = configService.get<number>('port') || 5000;
+  const port = process.env.PORT || configService.get<number>('port') || 5000;
   await app.listen(port);
 
   console.log(`Server running on port ${port}`);
+  
+  // Memory monitoring for Render free tier
+  setInterval(() => {
+    const used = process.memoryUsage();
+    const heapUsedMB = Math.round(used.heapUsed / 1024 / 1024);
+    console.log(`Memory usage: ${heapUsedMB}MB`);
+    
+    if (heapUsedMB > 300) { // Alert if over 300MB (60% of 512MB)
+      console.warn(`⚠️ High memory usage: ${heapUsedMB}MB`);
+    }
+  }, 30000);
 }
+
+// Graceful shutdown for Render
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT received, shutting down gracefully');
+  process.exit(0);
+});
+
 bootstrap();
