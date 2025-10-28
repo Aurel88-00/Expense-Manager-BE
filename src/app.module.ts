@@ -19,7 +19,8 @@ import { CacheModule } from '@nestjs/cache-manager';
     }]),
     CacheModule.register({
       isGlobal: true,
-      ttl: 120000,
+      ttl: 30000, // Reduced from 120000 to 30 seconds
+      max: 100, // Limit cache size
     }),
     ConfigModule.forRoot({
       isGlobal: true,
