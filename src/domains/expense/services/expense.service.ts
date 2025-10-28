@@ -20,6 +20,7 @@ import {
 import { EmailService } from '../../../shared/services/email.service';
 import { AiService } from '../../../shared/services/ai.service';
 import { CreateExpenseResponse } from '../types/types';
+import { ExpenseStatus } from '@shared/lib';
 
 @Injectable()
 export class ExpenseService {
@@ -39,7 +40,6 @@ export class ExpenseService {
       ? new Types.ObjectId(String(createExpenseDto.team))
       : createExpenseDto.team;
 
-    // Verify team exists
     const team = await this.teamModel.findById(teamId);
     if (!team) {
       throw new BadRequestException('Team not found');
@@ -55,7 +55,6 @@ export class ExpenseService {
       aiSuggestedCategory = aiSuggestion.category;
     }
 
-    // Check for potential duplicates
     const recentExpenses = await this.expenseModel
       .find({
         $or: [
@@ -88,7 +87,7 @@ export class ExpenseService {
       expense: savedExpense,
       aiSuggestion: null,
       duplicateWarning: null,
-    } as CreateExpenseResponse;
+    } as unknown as CreateExpenseResponse;
 
     if (aiSuggestion.success) {
       result.aiSuggestion = { category: aiSuggestion.category } as any;
@@ -175,7 +174,7 @@ export class ExpenseService {
     if (!expense) {
       throw new NotFoundException('Expense not found');
     }
-    return expense;
+    return expense as unknown as ExpenseDocument;
   }
 
   async update(
@@ -205,7 +204,6 @@ export class ExpenseService {
     if (updateExpenseDto.date) expense.date = new Date(updateExpenseDto.date);
     if (updateExpenseDto.status) expense.status = updateExpenseDto.status;
 
-    // If status changed to approved/rejected, update approval info
     if (
       updateExpenseDto.status &&
       updateExpenseDto.status !== oldStatus &&
@@ -235,7 +233,6 @@ export class ExpenseService {
       );
     }
 
-    // If expense was approved, update team's current spending
     if (updateExpenseDto.status === 'approved' && oldStatus !== 'approved') {
       const teamId =
         typeof expense.team === 'object' && expense.team !== null
@@ -276,9 +273,7 @@ export class ExpenseService {
       }
     }
 
-    // If expense was unapproved (from approved to pending/rejected), subtract from team spending
     if (oldStatus === 'approved' && updateExpenseDto.status !== 'approved') {
-      // Get team ID - handle both ObjectId and populated object
       const teamId =
         typeof expense.team === 'object' && expense.team !== null
           ? (expense.team as any)._id
@@ -301,7 +296,6 @@ export class ExpenseService {
       }
     }
 
-    // Populate team field and return
     await savedExpense.populate('team', 'name budget');
     return savedExpense;
   }
@@ -312,7 +306,6 @@ export class ExpenseService {
       throw new NotFoundException('Expense not found');
     }
 
-    // If expense was approved, subtract from team's current spending
     if (expense.status === 'approved') {
       const team = await this.teamModel.findById(expense.team);
       if (team) {
@@ -328,13 +321,11 @@ export class ExpenseService {
   }
 
   async getInsights(teamId: string): Promise<any> {
-    // Verify team exists
     const team = await this.teamModel.findById(teamId);
     if (!team) {
       throw new NotFoundException('Team not found');
     }
 
-    // Convert string to ObjectId for proper MongoDB query
     const teamObjectId = new Types.ObjectId(teamId);
 
     // Get all approved expenses for the team
@@ -345,7 +336,6 @@ export class ExpenseService {
       })
       .sort({ date: -1 });
 
-    // Generate AI insights
     const insights = await this.aiService.generateSpendingInsights(
       teamId,
       expenses,
@@ -360,16 +350,13 @@ export class ExpenseService {
   }
 
   async getForecast(teamId: string): Promise<any> {
-    // Verify team exists
     const team = await this.teamModel.findById(teamId);
     if (!team) {
       throw new NotFoundException('Team not found');
     }
 
-    // Convert string to ObjectId for proper MongoDB query
     const teamObjectId = new Types.ObjectId(teamId);
 
-    // Get all approved expenses for the team
     const expenses = await this.expenseModel
       .find({
         team: teamObjectId,
@@ -377,7 +364,6 @@ export class ExpenseService {
       })
       .sort({ date: -1 });
 
-    // Generate budget forecast
     const forecast = await this.aiService.forecastBudgetExceedance(
       teamId,
       expenses,
@@ -404,10 +390,9 @@ export class ExpenseService {
       throw new BadRequestException('Some expenses not found');
     }
 
-    // Update all expenses
-    const updatePromises = expenses.map(async (expense) => {
+    const updatePromises = (expenses as unknown as ExpenseDocument[]).map(async (expense) => {
       const oldStatus = expense.status;
-      expense.status = newStatus as any;
+      expense.status = newStatus as ExpenseStatus;
       expense.approvedBy = {
         name: approvedBy.name,
         email: approvedBy.email,
@@ -416,13 +401,11 @@ export class ExpenseService {
 
       const savedExpense = await expense.save();
 
-      // Send email notification
       await this.emailService.sendExpenseApprovalNotification(
         savedExpense,
         newStatus === 'approved',
       );
 
-      // Update team spending if approved
       if (newStatus === 'approved' && oldStatus !== 'approved') {
         const team = await this.teamModel.findById(expense.team);
         if (team) {
@@ -431,7 +414,7 @@ export class ExpenseService {
         }
       }
 
-      return savedExpense;
+      return savedExpense as unknown as ExpenseDocument;
     });
 
     await Promise.all(updatePromises);
