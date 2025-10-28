@@ -45,40 +45,54 @@ export class ExpenseService {
       throw new BadRequestException('Team not found');
     }
 
-    // Get AI category suggestion
-    const aiSuggestion = await this.aiService.suggestExpenseCategory(
-      createExpenseDto.description,
-      createExpenseDto.amount,
-    );
+    // Disable AI services in production to save memory
     let aiSuggestedCategory: any = null;
-    if (aiSuggestion.success) {
-      aiSuggestedCategory = aiSuggestion.category;
+    let isDuplicate = false;
+    let duplicateReason: string | null = null;
+
+    if (process.env.NODE_ENV !== 'production') {
+      try {
+        const aiSuggestion = await this.aiService.suggestExpenseCategory(
+          createExpenseDto.description,
+          createExpenseDto.amount,
+        );
+        if (aiSuggestion.success) {
+          aiSuggestedCategory = aiSuggestion.category;
+        }
+
+        const recentExpenses = await this.expenseModel
+          .find({
+            $or: [
+              { team: teamId },
+              { $expr: { $eq: [{ $toString: '$team' }, String(teamId)] } },
+            ],
+            date: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
+          })
+          .limit(10);
+
+        const duplicateCheck = await this.aiService.detectDuplicateExpense(
+          createExpenseDto.description,
+          createExpenseDto.amount,
+          createExpenseDto.team,
+          recentExpenses,
+        );
+
+        if (duplicateCheck.success) {
+          isDuplicate = duplicateCheck.isDuplicate || false;
+          duplicateReason = duplicateCheck.reason || null;
+        }
+      } catch (error) {
+        this.logger.warn('AI services unavailable, proceeding without AI features');
+      }
     }
-
-    const recentExpenses = await this.expenseModel
-      .find({
-        $or: [
-          { team: teamId },
-          { $expr: { $eq: [{ $toString: '$team' }, String(teamId)] } },
-        ],
-        date: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
-      })
-      .limit(10);
-
-    const duplicateCheck = await this.aiService.detectDuplicateExpense(
-      createExpenseDto.description,
-      createExpenseDto.amount,
-      createExpenseDto.team,
-      recentExpenses,
-    );
 
     const expense = new this.expenseModel({
       ...createExpenseDto,
       team: teamId,
       date: new Date(createExpenseDto.date),
       aiSuggestedCategory,
-      isDuplicate: duplicateCheck.success ? duplicateCheck.isDuplicate : false,
-      duplicateReason: duplicateCheck.success ? duplicateCheck.reason : null,
+      isDuplicate,
+      duplicateReason,
     });
 
     const savedExpense = await expense.save();
@@ -89,14 +103,14 @@ export class ExpenseService {
       duplicateWarning: null,
     } as unknown as CreateExpenseResponse;
 
-    if (aiSuggestion.success) {
-      result.aiSuggestion = { category: aiSuggestion.category } as any;
+    if (aiSuggestedCategory) {
+      result.aiSuggestion = { category: aiSuggestedCategory } as any;
     }
-    if (duplicateCheck.success && duplicateCheck.isDuplicate) {
+    if (isDuplicate) {
       result.duplicateWarning = {
         isDuplicate: true,
-        confidence: duplicateCheck.confidence,
-        reason: duplicateCheck.reason,
+        confidence: 0.8, 
+        reason: duplicateReason || 'Potential duplicate detected',
       } as any;
     }
 
@@ -148,10 +162,10 @@ export class ExpenseService {
     const expenses = await this.expenseModel
       .find(filter)
       .sort(sort)
-      .limit(Math.min(parseInt(limit), 50)) // Cap at 50 for Render free tier
+      .limit(Math.min(parseInt(limit), 50)) 
       .skip(skip)
       .populate('team', 'name budget currentSpending')
-      .lean() // Use lean() to reduce memory usage
+      .lean() 
       .exec();
 
     const total = await this.expenseModel.countDocuments(filter);
@@ -196,7 +210,6 @@ export class ExpenseService {
 
     const oldStatus = expense.status;
 
-    // Update fields
     if (updateExpenseDto.description)
       expense.description = updateExpenseDto.description;
     if (updateExpenseDto.amount !== undefined)
@@ -221,7 +234,6 @@ export class ExpenseService {
 
     const savedExpense = await expense.save();
 
-    // If status changed, send email notification
     if (
       updateExpenseDto.status &&
       updateExpenseDto.status !== oldStatus &&
@@ -322,6 +334,20 @@ export class ExpenseService {
   }
 
   async getInsights(teamId: string): Promise<any> {
+    // Disable AI services in production to save memory
+    if (process.env.NODE_ENV === 'production') {
+      return {
+        summary: 'AI insights disabled in production to optimize memory usage',
+        topCategory: 'N/A',
+        trends: 'N/A',
+        recommendations: ['Upgrade to paid tier for AI features'],
+        budgetHealth: 'N/A',
+        totalSpent: 0,
+        budgetUtilization: 0,
+        categoryBreakdown: {}
+      };
+    }
+
     const team = await this.teamModel.findById(teamId);
     if (!team) {
       throw new NotFoundException('Team not found');
@@ -329,7 +355,6 @@ export class ExpenseService {
 
     const teamObjectId = new Types.ObjectId(teamId);
 
-    // Get all approved expenses for the team
     const expenses = await this.expenseModel
       .find({
         team: teamObjectId,
@@ -337,20 +362,47 @@ export class ExpenseService {
       })
       .sort({ date: -1 });
 
-    const insights = await this.aiService.generateSpendingInsights(
-      teamId,
-      expenses,
-      team.budget,
-    );
+    try {
+      const insights = await this.aiService.generateSpendingInsights(
+        teamId,
+        expenses,
+        team.budget,
+      );
 
-    if (!insights.success) {
-      throw new BadRequestException(insights.error);
+      if (!insights.success) {
+        throw new BadRequestException(insights.error);
+      }
+
+      return insights.insights;
+    } catch (error) {
+      this.logger.warn('AI insights service unavailable, returning basic data');
+      return {
+        summary: 'AI insights temporarily unavailable',
+        topCategory: 'N/A',
+        trends: 'N/A',
+        recommendations: ['AI services are temporarily unavailable'],
+        budgetHealth: 'N/A',
+        totalSpent: 0,
+        budgetUtilization: 0,
+        categoryBreakdown: {}
+      };
     }
-
-    return insights.insights;
   }
 
   async getForecast(teamId: string): Promise<any> {
+    // Disable AI services in production to save memory
+    if (process.env.NODE_ENV === 'production') {
+      return {
+        willExceedBudget: false,
+        confidence: 0,
+        predictedOverspend: 0,
+        monthsToExceed: 0,
+        recommendations: ['Upgrade to paid tier for AI features'],
+        averageMonthlySpending: 0,
+        currentUtilization: 0
+      };
+    }
+
     const team = await this.teamModel.findById(teamId);
     if (!team) {
       throw new NotFoundException('Team not found');
@@ -365,18 +417,31 @@ export class ExpenseService {
       })
       .sort({ date: -1 });
 
-    const forecast = await this.aiService.forecastBudgetExceedance(
-      teamId,
-      expenses,
-      team.budget,
-      team.currentSpending,
-    );
+    try {
+      const forecast = await this.aiService.forecastBudgetExceedance(
+        teamId,
+        expenses,
+        team.budget,
+        team.currentSpending,
+      );
 
-    if (!forecast.success) {
-      throw new BadRequestException(forecast.error);
+      if (!forecast.success) {
+        throw new BadRequestException(forecast.error);
+      }
+
+      return forecast.forecast;
+    } catch (error) {
+      this.logger.warn('AI forecast service unavailable, returning basic data');
+      return {
+        willExceedBudget: false,
+        confidence: 0,
+        predictedOverspend: 0,
+        monthsToExceed: 0,
+        recommendations: ['AI services are temporarily unavailable'],
+        averageMonthlySpending: 0,
+        currentUtilization: 0
+      };
     }
-
-    return forecast.forecast;
   }
 
   async bulkAction(
