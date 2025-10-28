@@ -161,11 +161,11 @@ export class Expense {
 ## 2. Architecture (DDD - Domain-driven design)
 Our API follows a clean, ddd including three main layers: controllers, service, and data access layer, ensuring clear separation of concerns.
 
-*Controller Layer (API Routes): Handles HTTP requests, authentication, and input validation. Calls the Service Layer.
+* Controller Layer (API Routes): Handles HTTP requests, authentication, and input validation. Calls the Service Layer.
 
-*Service Layer (Business Logic): Contains all core logic (e.g., createExpense, calculateBudget, checkBudgetAndAlert). This layer coordinates interactions between the Data Access Layer and external services.
+* Service Layer (Business Logic): Contains all core logic (e.g., createExpense, calculateBudget, checkBudgetAndAlert). This layer coordinates interactions between the Data Access Layer and external services.
 
-*Data Access Layer (DAL): Handles direct CRUD operations on the database.
+* Data Access Layer (DAL): Handles direct CRUD operations on the database.
 
 ## 3. External Service Integration Points
 Implements two external services, one to smartly handle email notifications when certain budget expenditure criteria are met, and an AI service to predict
