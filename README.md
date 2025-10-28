@@ -172,6 +172,10 @@ Implements two external services, one to smartly handle email notifications when
 teams' expenditure patterns and future management issues.
 The AI is a free tier and has a rate limiter issue, but if you provide your billing information, it will work!
 
+## 4. Swagger Documentation of API 
+```
+http://host:port/api/docs
+```
 
 ## Environment variables 
 In order to run the application, you should set up your local environment variables. 
